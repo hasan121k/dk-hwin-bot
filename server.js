@@ -42,7 +42,6 @@ db.ref('telegram_settings_30s').on('value', (snap) => {
 // --- 4. TELEGRAM MESSAGE SENDER ---
 async function sendTelegramMsg(msgType, period, signal = "") {
     try {
-        // Firebase থেকে Admin Control: Auto Forward OFF (is_active = false) থাকলে মেসেজ যাবে না।
         if (!tgSettings || tgSettings.is_active === false) return; 
         if (!tgSettings.bot_token || !tgSettings.chat_id) return;
 
@@ -53,7 +52,6 @@ async function sendTelegramMsg(msgType, period, signal = "") {
 
         if (!rawMsg) return;
 
-        // Replace placeholders (e.g. {period}, {signal})
         let finalMsg = rawMsg.replace(/{period}/g, period).replace(/{signal}/g, signal);
 
         const url = `https://api.telegram.org/bot${tgSettings.bot_token}/sendMessage`;
@@ -83,11 +81,28 @@ function getMathPrediction(list, nextPeriodNumber) {
 // --- 6. CORE GAME LOOP (SYNC 30S API) ---
 const API_30S = 'https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json';
 let currentPeriod = "";
-let pendingPrediction = null; // { period: "...", size: "..." }
+let pendingPrediction = null;
 
 async function syncServer() {
     try {
-        const response = await axios.get(API_30S + '?v=' + Date.now());
+        // 403 Forbidden বাইপাস করার জন্য ফেইক ব্রাউজার হেডার্স
+        const config = {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'en-US,en;q=0.9,bn;q=0.8',
+                'Referer': 'https://ar-lottery01.com/',
+                'Origin': 'https://ar-lottery01.com',
+                'Connection': 'keep-alive',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-site',
+                'Cache-Control': 'no-cache'
+            },
+            timeout: 10000 // রিকোয়েস্ট আটকে গেলে ক্র্যাশ ঠেকানোর জন্য টাইমআউট
+        };
+
+        const response = await axios.get(`${API_30S}?v=${Date.now()}`, config);
         const list = response.data?.data?.list;
         
         if (!list || list.length < 5) return;
@@ -97,38 +112,38 @@ async function syncServer() {
         const actualSize = actualNumber >= 5 ? 'BIG' : 'SMALL';
         const nextPrd = (BigInt(latestIssue) + 1n).toString();
 
-        // 🟢 CHECK PREVIOUS PENDING RESULT
+        // 🟢 CHECK PREVIOUS PENDING RESULT (Win/Loss Check)
         if (pendingPrediction && pendingPrediction.period === latestIssue) {
             const isWin = (pendingPrediction.size === actualSize);
-            
-            // Send Win/Loss to Telegram
             await sendTelegramMsg(isWin ? 'WIN' : 'LOSS', latestIssue.slice(-4));
-            
-            // Clear pending
             pendingPrediction = null; 
         }
 
-        // 🔵 NEW PERIOD DETECTED
+        // 🔵 NEW PERIOD DETECTED (Signal Generation)
         if (currentPeriod !== nextPrd) {
             currentPeriod = nextPrd;
             console.log(`\n⚡ New Cycle Started: ${nextPrd}`);
             
             const predictionSize = getMathPrediction(list, nextPrd);
-            
-            // Save as pending for next cycle
             pendingPrediction = { period: nextPrd, size: predictionSize };
             
-            // Send Signal to Telegram (Delayed slightly)
             setTimeout(async () => { 
                 await sendTelegramMsg('SIGNAL', nextPrd.slice(-4), predictionSize); 
             }, 1000);
         }
 
     } catch (error) {
-        console.error("⚠️ API Sync Error:", error.message);
+        if (error.response) {
+            // যদি ওয়েবসাইট ব্লক করে
+            console.error(`⚠️ API Error (Status ${error.response.status}): Website is blocking or down.`);
+        } else if (error.code === 'ECONNABORTED') {
+            console.error("⚠️ API Timeout: Website took too long to respond.");
+        } else {
+            console.error("⚠️ API Sync Error:", error.message);
+        }
     }
 }
 
-// Run the loop every 2 seconds (Optmized and crash-proof)
-setInterval(syncServer, 2000);
+// লুপ চালানো হচ্ছে প্রতি ৩ সেকেন্ডে (3000 ms) যেন সার্ভার ব্লক না করে
+setInterval(syncServer, 3000);
 console.log("🚀 Engine Started! Waiting for API sync...");
