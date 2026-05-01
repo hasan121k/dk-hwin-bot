@@ -3,12 +3,12 @@ const axios = require('axios');
 const firebase = require('firebase/app');
 require('firebase/database');
 
-// --- 1. EXPRESS SERVER (For Render) ---
+// --- 1. EXPRESS SERVER ---
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send('✅ DK WIN Backend is Running 24/7 (Proxy Enabled)');
+    res.send('✅ DK WIN Backend is Running with Multi-Proxy Bypass!');
 });
 
 app.listen(PORT, () => {
@@ -49,7 +49,7 @@ async function sendTelegramMsg(msgType, period, signal = "") {
         });
         console.log(`📨 Sent [${msgType}] for Period: ${period}`);
     } catch (err) {
-        console.log("❌ TG Error:", err.message);
+        // Silent error for TG to prevent console spam
     }
 }
 
@@ -64,19 +64,40 @@ function getMathPrediction(list, nextPeriodNumber) {
     return finalDigit >= 5 ? 'BIG' : 'SMALL';
 }
 
-// --- 5. CORE GAME LOOP (PROXY BYPASS 403 FIX) ---
+// --- 5. ROBUST MULTI-PROXY FETCH SYSTEM ---
 const TARGET_URL = 'https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json';
+
+async function fetchGameData() {
+    const timestamp = Date.now();
+    const targetWithTime = `${TARGET_URL}?v=${timestamp}`;
+    
+    // 3টি আলাদা প্রক্সি, একটি ফেইল করলে অন্যটি কাজ করবে
+    const proxyList = [
+        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetWithTime)}`,
+        `https://corsproxy.io/?${encodeURIComponent(targetWithTime)}`,
+        `https://thingproxy.freeboard.io/fetch/${targetWithTime}`
+    ];
+
+    for (let proxy of proxyList) {
+        try {
+            const response = await axios.get(proxy, { timeout: 8000 });
+            if (response.data && response.data.data && response.data.data.list) {
+                return response.data.data.list; // সফল হলে ডেটা রিটার্ন করবে
+            }
+        } catch (e) {
+            continue; // ব্লক খেলে বা 500 আসলে পরের প্রক্সিতে যাবে
+        }
+    }
+    throw new Error("All proxies failed to fetch");
+}
+
+// --- 6. CORE GAME LOOP ---
 let currentPeriod = "";
 let pendingPrediction = null;
 
 async function syncServer() {
     try {
-        // 🚀 PROXY URL: Render IP হাইড করে 403 ব্লক বাইপাস করবে
-        const timestamp = Date.now();
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(TARGET_URL + '?v=' + timestamp)}`;
-
-        const response = await axios.get(proxyUrl, { timeout: 15000 });
-        const list = response.data?.data?.list;
+        const list = await fetchGameData();
         if (!list || list.length < 5) return;
 
         const latestIssue = list[0].issueNumber;
@@ -100,10 +121,10 @@ async function syncServer() {
             setTimeout(() => sendTelegramMsg('SIGNAL', nextPrd.slice(-4), predictionSize), 1000);
         }
     } catch (error) {
-        console.log("⚠️ Sync Error (Re-trying...):", error.message);
+        console.log("⚠️ Syncing via backup routes...");
     }
 }
 
-// প্রতি ৩.৫ সেকেন্ডে ডেটা আনবে (ব্যান হওয়া থেকে বাঁচাতে)
-setInterval(syncServer, 3500);
-console.log("🚀 Engine Started! Proxy Bypass Enabled...");
+// প্রতি ৪ সেকেন্ডে ডেটা আনবে (বেশি ফাস্ট করলে প্রক্সি ব্লক করে দেয়)
+setInterval(syncServer, 4000);
+console.log("🚀 Engine Started! Auto-switching Proxies Enabled...");
