@@ -1,7 +1,7 @@
 {
-  "name": "dk-win-bot-backend",
+  "name": "vip-wingo-predictor",
   "version": "1.0.0",
-  "description": "DK WIN 30S Prediction & Telegram Bot",
+  "description": "Wingo Predictor Bot and Admin Panel",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -9,6 +9,6 @@
   "dependencies": {
     "axios": "^1.6.7",
     "express": "^4.18.2",
-    "firebase": "^8.10.1"
+    "firebase": "^10.8.0"
   }
 }
